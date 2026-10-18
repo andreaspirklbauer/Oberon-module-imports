@@ -1,9 +1,19 @@
-MODULE ORTool;  (*NW 18.2.2013 / 12.4.2017 / AP 7.8.22 Extended Oberon*)
+MODULE ORTool;  (*NW 18.2.2013 / 12.4.2017 / AP 1.10.26 Extended Oberon*)
   IMPORT SYSTEM, Files, Modules, Texts, Oberon, ORB;
   CONST TAB = 09X;  (*copied from Input for use as cross development tool*)
+    AllocAdr = 16; FPrintAdr = 28; ModAdr = 32; FPrint = 12345678H; (*copied from ORL*)
   VAR W: Texts.Writer;
     mnemo0, mnemo1: ARRAY 16, 4 OF CHAR;  (*mnemonics*)
-    typlev: INTEGER;
+    indentlev: INTEGER;
+
+  PROCEDURE incL; BEGIN INC(indentlev) END incL;
+  PROCEDURE decL; BEGIN DEC(indentlev) END decL;
+
+  PROCEDURE WriteIndent;
+    VAR i: INTEGER;
+  BEGIN
+    FOR i := 0 TO indentlev DO Texts.Write(W, 09X) END
+  END WriteIndent;
 
   PROCEDURE Read(VAR R: Files.Rider; VAR x: INTEGER);
     VAR b: BYTE;
@@ -15,55 +25,61 @@ MODULE ORTool;  (*NW 18.2.2013 / 12.4.2017 / AP 7.8.22 Extended Oberon*)
     VAR key, len, size, off: INTEGER;
       ref, orgref, modref, class, form, readonly: INTEGER;
       name, modname: ARRAY 32 OF CHAR;
-  BEGIN INC(typlev); Read(R, ref); Texts.Write(W, " "); Texts.WriteLn(W);
-    FOR off := 0 TO typlev DO Texts.Write(W, 09X) END ;
-    Texts.Write(W, "[");
+  BEGIN Read(R, ref); incL;
+    IF ref > 0 THEN Texts.WriteLn(W); WriteIndent ELSE Texts.WriteString(W, "  ") END ;
+    Texts.WriteString(W, "[");
     IF ref < 0 THEN Texts.Write(W, "^"); Texts.WriteInt(W, -ref, 1)
     ELSE Texts.WriteInt(W, ref, 1);
-      IF ref > 0 THEN  (*named type*)
+      IF ref > 0 THEN
         Read(R, modref);
         IF modref # 0 THEN  (*re-import*)
           IF modref < 0 THEN Texts.WriteString(W, " ^^"); Texts.WriteInt(W, -modref, 1); modname[0] := 0X
           ELSE Files.ReadString(R, modname); Files.ReadInt(R, key); Texts.Write(W, " ")
           END ;
           Files.ReadString(R, name); Read(R, orgref);
-          Texts.WriteString(W, modname); Texts.Write(W, ".");
-          Texts.WriteString(W, name); Texts.WriteHex(W, key)
+          Texts.WriteString(W, modname); Texts.Write(W, "."); Texts.WriteString(W, name);
+          Texts.WriteHex(W, key)
         END
       END ;
       Read(R, form); Texts.WriteString(W, "  form = "); Texts.WriteInt(W, form, 1);
       IF form = ORB.Pointer THEN ReadType(R)
       ELSIF form = ORB.Array THEN
-        ReadType(R); Files.ReadNum(R, len); Files.ReadNum(R, size);
-        Texts.WriteString(W, "  len = "); Texts.WriteInt(W, len, 1);
-        Texts.WriteString(W, "  size = "); Texts.WriteInt(W, size, 1)
+        ReadType(R);  (*element type*)
+        Files.ReadNum(R, len); Texts.WriteString(W, "  len = "); Texts.WriteInt(W, len, 1);
+        Files.ReadNum(R, size); Texts.WriteString(W, "  size = "); Texts.WriteInt(W, size, 1)
       ELSIF form = ORB.Record THEN
         ReadType(R);  (*base type*)
         Files.ReadNum(R, off); Texts.WriteString(W, "  exno = "); Texts.WriteInt(W, off, 1);
         Files.ReadNum(R, off); Texts.WriteString(W, "  extlev = "); Texts.WriteInt(W, off, 1);
         Files.ReadNum(R, size); Texts.WriteString(W, "  size = "); Texts.WriteInt(W, size, 1);
-        Texts.Write(W, " "); Texts.Write(W, "{"); Read(R, class);
+        Texts.WriteLn(W); incL; WriteIndent; Texts.Write(W, "{"); Texts.WriteLn(W); incL;
+        Read(R, class);
         WHILE class # 0 DO  (*fields*)
-          Files.ReadString(R, name);
-          IF name[0] # 0X THEN Texts.Write(W, " "); Texts.WriteString(W, name); ReadType(R);
+          Files.ReadString(R, name); WriteIndent;
+          IF name[0] # 0X THEN Texts.WriteString(W, name); ReadType(R);
             IF class = ORB.Const THEN Files.ReadNum(R, off); Texts.WriteInt(W, off, 4) END  (*exno*)
-          ELSE (*hidden*) Texts.WriteString(W, " --")
+          ELSE (*hidden*) Texts.WriteString(W, "--")
           END ;
           Files.ReadNum(R, off); Texts.WriteInt(W, off, 4);  (*mthno/offset*)
+          Texts.WriteLn(W);
           Read(R, class)
         END ;
-        Texts.Write(W, "}")
+        decL; WriteIndent; Texts.Write(W, "}"); decL
       ELSIF form IN {ORB.Proc, ORB.TProc} THEN
-        ReadType(R); Texts.Write(W, "("); Read(R, class);
+        ReadType(R);  (*return type*)
+        Texts.WriteLn(W); incL; WriteIndent; Texts.Write(W, "("); Texts.WriteLn(W); incL;
+        Read(R, class);
         WHILE class # 0 DO  (*parameters*)
-          Texts.WriteString(W, " class = "); Texts.WriteInt(W, class, 1); Read(R, readonly);
+          WriteIndent; Texts.WriteString(W, "class = "); Texts.WriteInt(W, class, 1); Read(R, readonly);
           IF readonly = 1 THEN Texts.Write(W, "#") END ;
-          ReadType(R); Read(R, class)
+          ReadType(R);  (*parameter type*)
+          Texts.WriteLn(W);
+          Read(R, class)
         END ;
-        Texts.Write(W, ")")
+        decL; WriteIndent; Texts.Write(W, ")"); decL
       END
     END ;
-    Texts.Write(W, "]"); DEC(typlev)
+    Texts.Write(W, "]"); decL
   END ReadType;
 
   PROCEDURE DecSym*;  (*decode symbol file*)
@@ -81,12 +97,12 @@ MODULE ORTool;  (*NW 18.2.2013 / 12.4.2017 / AP 7.8.22 Extended Oberon*)
         Files.ReadString(R, name); Texts.WriteString(W, name); Texts.WriteHex(W, k);
         Read(R, class); Texts.WriteInt(W, class, 3);  (*sym file version*)
         IF class = ORB.versionkey THEN
-          Texts.WriteLn(W); Read(R, class); typlev := 0;
+          Texts.WriteLn(W); Read(R, class); indentlev := 0;
           WHILE class # 0 DO
             Texts.WriteInt(W, class, 4); Files.ReadString(R, name); Texts.Write(W, " "); Texts.WriteString(W, name);
             ReadType(R);
             IF (class = ORB.Const) OR (class = ORB.Var) THEN
-              Files.ReadNum(R, k); Texts.WriteInt(W, k, 5);  (*Reals, Strings!*)
+              Files.ReadNum(R, k); Texts.WriteInt(W, k, 5);  (*Reals, Strings, Procs*)
             END ;
             Texts.WriteLn(W); Texts.Append(Oberon.Log, W.buf);
             Read(R, class)
@@ -296,7 +312,40 @@ MODULE ORTool;  (*NW 18.2.2013 / 12.4.2017 / AP 7.8.22 Extended Oberon*)
      END
   END DecMod;
 
-BEGIN Texts.OpenWriter(W); Texts.WriteString(W, "ORTool 18.2.2013 / AP 1.8.22");
+  PROCEDURE DecBin*;  (*decode pre-linked binary file*)
+    VAR AllocPtr, fprint, pos, num, size, prg, refcnt: INTEGER;
+      name: ARRAY 32 OF CHAR;
+      F: Files.File; R: Files.Rider;
+      S: Texts.Scanner;
+  BEGIN Texts.OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Texts.Scan(S);
+    IF S.class = Texts.Name THEN
+      Texts.WriteString(W, "decode "); Texts.WriteString(W, S.s); F := Files.Old(S.s);
+      IF F # NIL THEN
+        Files.Set(R, F, FPrintAdr); Files.ReadInt(R, fprint);
+        IF fprint = FPrint THEN
+          Files.Set(R, F, AllocAdr); Files.ReadInt(R, AllocPtr); Texts.WriteInt(W, AllocPtr, 7); Texts.WriteLn(W);
+          Files.Set(R, F, ModAdr); pos := ModAdr;
+          WHILE ~R.eof & (pos < AllocPtr) DO
+            Files.ReadString(R, name);
+            Files.Set(R, F, pos+40); (*num*) Files.ReadInt(R, num);
+            Files.ReadInt(R, size); (*size*) Files.ReadInt(R, refcnt); (*refcnt*)
+            Files.Set(R, F, pos+64); (*prg*) Files.ReadInt(R, prg);
+            IF name[0] # 0X THEN Texts.WriteString(W, "  ");
+              Texts.WriteString(W, name); Texts.WriteInt(W, num, 4); Texts.Write(W, TAB);
+              Texts.WriteHex(W, pos); Texts.WriteHex(W, prg); Texts.WriteInt(W, refcnt, 4)
+            ELSE Texts.WriteString(W, "---")
+            END ;
+            Texts.WriteLn(W); INC(pos, size); Files.Set(R, F, pos)
+          END
+        ELSE Texts.WriteString(W, "  input file format error"); Texts.WriteLn(W)
+        END
+      ELSE Texts.WriteString(W, " not found"); Texts.WriteLn(W)
+      END ;
+      Texts.Append(Oberon.Log, W.buf)
+    END
+  END DecBin;
+
+BEGIN Texts.OpenWriter(W); Texts.WriteString(W, "ORTool 18.2.2013 / AP 1.10.26");
   Texts.WriteLn(W); Texts.Append(Oberon.Log, W.buf);
   mnemo0[0] := "MOV";
   mnemo0[1] := "LSL";
